@@ -23,7 +23,7 @@ const GOOGLE_DRIVE_FOLDER_IDS = {
 };
 
 let oAuth2Client;
-let isGoogleReady = false; // 구글 인증 완료 여부 플래그
+let isGoogleReady = false;
 
 // --- Helper 함수 (DB 읽기/쓰기) ---
 const readStudentsDb = async () => JSON.parse(await fs.readFile(STUDENTS_DB_PATH, 'utf-8'));
@@ -35,8 +35,15 @@ const writeDb = async (data) => { await fs.writeFile(DB_PATH, JSON.stringify(dat
 async function loadClient() {
     try {
         const credentials = JSON.parse(await fs.readFile(OAUTH_CRED_PATH));
-        const { client_secret, client_id, redirect_uris } = credentials.web;
-        oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
+        const { client_secret, client_id } = credentials.web;
+
+        // [최종 수정] NODE_ENV 환경 변수를 기준으로 리디렉션 주소를 결정합니다.
+        const isProduction = process.env.NODE_ENV === 'production';
+        const redirectUri = isProduction
+            ? `${process.env.RENDER_EXTERNAL_URL}/oauth2callback` // Render 환경일 때
+            : 'http://localhost:3001';                         // 로컬 개발 환경일 때
+
+        oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirectUri);
 
         try {
             const token = JSON.parse(await fs.readFile(TOKEN_PATH));
@@ -57,14 +64,11 @@ async function loadClient() {
     }
 }
 
-// --- Express 앱 설정 ---
+// --- Express 앱 설정 및 API 라우터 (이하 코드는 이전과 동일) ---
 app.use(express.json());
 app.use(express.static('public'));
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --- API 라우터 ---
-
-// [수정] 구글 인증 편지를 받을 공식 우편함 주소
 app.get('/oauth2callback', async (req, res) => {
     const code = req.query.code;
     if (code) {
@@ -74,7 +78,7 @@ app.get('/oauth2callback', async (req, res) => {
             await fs.writeFile(TOKEN_PATH, JSON.stringify(tokens));
             isGoogleReady = true;
             console.log('토큰이 성공적으로 저장되었습니다. 이제 서버가 정상 작동합니다.');
-            res.send('<h1>인증 성공!</h1><p>이 창을 닫고 원래 사이트로 돌아가세요. 서버가 곧 재시작됩니다.</p>');
+            res.send('<h1>인증 성공!</h1><p>이 창을 닫고 원래 사이트로 돌아가세요. 서버가 곧 재시작될 수 있습니다.</p>');
         } catch (error) {
             console.error('토큰 교환 중 오류:', error);
             res.status(500).send('인증 중 오류가 발생했습니다.');
@@ -84,12 +88,10 @@ app.get('/oauth2callback', async (req, res) => {
     }
 });
 
-// [수정] 업로드 전, 구글 인증이 완료되었는지 확인
 app.post('/upload', upload.single('image'), async (req, res) => {
     if (!isGoogleReady) {
         return res.status(503).json({ message: '서버가 아직 Google Drive에 연결되지 않았습니다. 잠시 후 다시 시도해주세요.' });
     }
-    // ... 이하 업로드 로직은 이전과 동일 ...
     try {
         const { file } = req;
         const { studentId, studentName, classNumber } = req.body;
@@ -114,7 +116,6 @@ app.post('/upload', upload.single('image'), async (req, res) => {
     }
 });
 
-// --- 나머지 API (이전과 동일) ---
 app.post('/api/login', async (req, res) => { try { const { studentId, studentName, password } = req.body; if (studentId === '00000' && studentName === '최현종' && password === 'donggwangedu') { return res.json({ success: true, isAdmin: true, admin: { name: '최현종' } }); } const students = await readStudentsDb(); const student = students.find(s => s.id === studentId && s.name === studentName); if (!student) return res.status(404).json({ message: '학번 또는 이름을 찾을 수 없습니다.' }); if (student.password !== password) return res.status(401).json({ message: '비밀번호가 일치하지 않습니다.' }); const classNumber = student.id.substring(2, 3); res.json({ success: true, isAdmin: false, requiresPasswordChange: password === '1111', student: { id: student.id, name: student.name, classNumber } }); } catch (error) { res.status(500).json({ message: '로그인 중 서버 오류가 발생했습니다.' }); } });
 app.post('/api/change-password', async (req, res) => { try { const { studentId, newPassword } = req.body; let students = await readStudentsDb(); const studentIndex = students.findIndex(s => s.id === studentId); if (studentIndex === -1) return res.status(404).json({ message: '학생 정보를 찾을 수 없습니다.' }); students[studentIndex].password = newPassword; await writeStudentsDb(students); res.json({ success: true, message: '비밀번호가 성공적으로 변경되었습니다.' }); } catch (error) { res.status(500).json({ message: '비밀번호 변경 중 서버 오류가 발생했습니다.' }); } });
 app.get('/api/admin/students', async (req, res) => { try { const students = await readStudentsDb(); const studentsWithoutPasswords = students.map(({ password, ...student }) => student); res.json(studentsWithoutPasswords); } catch (error) { res.status(500).json({ message: '학생 목록을 불러오는 중 서버 오류가 발생했습니다.' }); } });
@@ -122,8 +123,6 @@ app.post('/api/admin/reset-password', async (req, res) => { try { const { studen
 app.get('/api/admin/all-images', async (req, res) => { try { const db = await readDb(); res.json(db.uploads); } catch (error) { res.status(500).json({ message: '전체 이미지 목록을 불러오는 중 서버 오류가 발생했습니다.' }); } });
 app.get('/api/images/:classNumber', async (req, res) => { const { classNumber } = req.params; const db = await readDb(); const classImages = db.uploads.filter(upload => upload.classNumber === classNumber); classImages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); res.json(classImages); });
 
-
-// --- 서버 시작 ---
 loadClient().then(() => {
     app.listen(port, () => {
         console.log(`\n서버가 http://localhost:${port} 에서 실행 중입니다.`);
