@@ -1,0 +1,11 @@
+# Node.js의 설치된 도구들
+node_modules/
+
+# 비밀 정보 파일들
+oauth_credentials.json
+token.json
+db.json
+
+# 운영체제 자동 생성 파일
+.DS_Store
+Thumbs.db
