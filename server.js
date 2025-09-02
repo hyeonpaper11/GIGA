@@ -8,11 +8,13 @@ const { PassThrough } = require('stream');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// --- 파일 경로 설정 ---
-const OAUTH_CRED_PATH = path.join(__dirname, 'oauth_credentials.json');
-const TOKEN_PATH = path.join(__dirname, 'token.json');
-const DB_PATH = path.join(__dirname, 'db.json');
-const STUDENTS_DB_PATH = path.join(__dirname, 'students.json');
+// --- [수정] 파일 경로 설정 ---
+// Render의 영구 디스크 경로를 우선적으로 사용하고, 없으면 현재 폴더(__dirname)를 사용합니다.
+const DATA_PATH = process.env.RENDER_DISK_MOUNT_PATH || __dirname;
+const OAUTH_CRED_PATH = path.join(__dirname, 'oauth_credentials.json'); // 비밀 열쇠는 코드와 함께 있어야 함
+const STUDENTS_DB_PATH = path.join(__dirname, 'students.json'); // 학생 명단도 코드와 함께
+const TOKEN_PATH = path.join(DATA_PATH, 'token.json'); // 토큰은 영구 디스크에 저장
+const DB_PATH = path.join(DATA_PATH, 'db.json'); // 업로드 기록도 영구 디스크에 저장
 
 // --- 드라이브 폴더 ID 설정 ---
 const GOOGLE_DRIVE_FOLDER_IDS = {
@@ -36,13 +38,8 @@ async function loadClient() {
     try {
         const credentials = JSON.parse(await fs.readFile(OAUTH_CRED_PATH));
         const { client_secret, client_id } = credentials.web;
-
-        // [최종 수정] NODE_ENV 환경 변수를 기준으로 리디렉션 주소를 결정합니다.
         const isProduction = process.env.NODE_ENV === 'production';
-        const redirectUri = isProduction
-            ? `${process.env.RENDER_EXTERNAL_URL}/oauth2callback` // Render 환경일 때
-            : 'http://localhost:3001';                         // 로컬 개발 환경일 때
-
+        const redirectUri = isProduction ? `${process.env.RENDER_EXTERNAL_URL}/oauth2callback` : 'http://localhost:3001';
         oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirectUri);
 
         try {
