@@ -8,13 +8,12 @@ const { PassThrough } = require('stream');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// --- [수정] 파일 경로 설정 ---
-// Render의 영구 디스크 경로를 우선적으로 사용하고, 없으면 현재 폴더(__dirname)를 사용합니다.
+// --- 파일 경로 설정 ---
 const DATA_PATH = process.env.RENDER_DISK_MOUNT_PATH || __dirname;
-const OAUTH_CRED_PATH = path.join(__dirname, 'oauth_credentials.json'); // 비밀 열쇠는 코드와 함께 있어야 함
-const STUDENTS_DB_PATH = path.join(__dirname, 'students.json'); // 학생 명단도 코드와 함께
-const TOKEN_PATH = path.join(DATA_PATH, 'token.json'); // 토큰은 영구 디스크에 저장
-const DB_PATH = path.join(DATA_PATH, 'db.json'); // 업로드 기록도 영구 디스크에 저장
+const OAUTH_CRED_PATH = path.join(__dirname, 'oauth_credentials.json');
+const STUDENTS_DB_PATH = path.join(__dirname, 'students.json');
+const TOKEN_PATH = path.join(DATA_PATH, 'token.json');
+const DB_PATH = path.join(DATA_PATH, 'db.json');
 
 // --- 드라이브 폴더 ID 설정 ---
 const GOOGLE_DRIVE_FOLDER_IDS = {
@@ -38,8 +37,12 @@ async function loadClient() {
     try {
         const credentials = JSON.parse(await fs.readFile(OAUTH_CRED_PATH));
         const { client_secret, client_id } = credentials.web;
+        
         const isProduction = process.env.NODE_ENV === 'production';
-        const redirectUri = isProduction ? `${process.env.RENDER_EXTERNAL_URL}/oauth2callback` : 'http://localhost:3001';
+        const redirectUri = isProduction 
+            ? `${process.env.RENDER_EXTERNAL_URL}/oauth2callback` 
+            : 'http://localhost:3001';
+
         oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirectUri);
 
         try {
@@ -57,14 +60,17 @@ async function loadClient() {
         }
     } catch (err) {
         console.error('OAuth credentials 파일을 읽는 데 실패했습니다.', err);
-        process.exit(1);
     }
 }
 
-// --- Express 앱 설정 및 API 라우터 (이하 코드는 이전과 동일) ---
+// --- Express 앱 설정 및 API 라우터 ---
+app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
-app.use(express.static('public'));
 const upload = multer({ storage: multer.memoryStorage() });
+
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 app.get('/oauth2callback', async (req, res) => {
     const code = req.query.code;
@@ -100,10 +106,25 @@ app.post('/upload', upload.single('image'), async (req, res) => {
         const bufferStream = new PassThrough();
         bufferStream.end(file.buffer);
         const media = { mimeType: file.mimetype, body: bufferStream };
-        const response = await drive.files.create({ resource: fileMetadata, media: media, fields: 'id, name, webViewLink, thumbnailLink' });
+        
+        // --- [수정] thumbnailLink를 요청 필드에 추가하고 사용 ---
+        const response = await drive.files.create({ 
+            resource: fileMetadata, 
+            media: media, 
+            fields: 'id, name, webViewLink, thumbnailLink' 
+        });
+
         await drive.permissions.create({ fileId: response.data.id, requestBody: { role: 'reader', type: 'anyone' } });
+        
         const db = await readDb();
-        const newUpload = { id: response.data.id, fileName: response.data.name, studentName: studentName, classNumber: classNumber, url: `https://drive.google.com/uc?export=view&id=${response.data.id}`, timestamp: new Date().toISOString() };
+        const newUpload = { 
+            id: response.data.id, 
+            fileName: response.data.name, 
+            studentName: studentName, 
+            classNumber: classNumber, 
+            url: response.data.thumbnailLink, // [수정] thumbnailLink를 직접 사용
+            timestamp: new Date().toISOString() 
+        };
         db.uploads.push(newUpload);
         await writeDb(db);
         res.status(200).json({ message: '파일이 성공적으로 업로드되었습니다.', upload: newUpload });
