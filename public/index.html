@@ -101,23 +101,15 @@
                 <button id="show-photo-check-btn" class="bg-teal-600 text-white font-semibold py-2 px-6 rounded-lg hover:bg-teal-700 transition-colors">사진 확인</button>
             </div>
             
-            <!-- 관리자 기능 뷰 -->
             <div id="admin-view-container">
-                <!-- 학생 관리 뷰 (숨김) -->
                 <div id="student-management-view" class="hidden">
-                    <div class="student-list-container max-h-96 overflow-y-auto p-2">
-                        <!-- 학생 목록이 여기에 동적으로 로드됩니다. -->
-                    </div>
+                    <div class="student-list-container max-h-96 overflow-y-auto p-2"></div>
                 </div>
-                <!-- 사진 확인 뷰 (숨김) -->
                 <div id="photo-check-view" class="hidden">
-                    <div id="admin-gallery-container" class="space-y-10">
-                        <!-- 전체 갤러리가 여기에 동적으로 로드됩니다. -->
-                    </div>
+                    <div id="admin-gallery-container" class="space-y-10"></div>
                 </div>
             </div>
         </div>
-
     </div>
 
     <!-- 비밀번호 초기화 확인 모달 -->
@@ -132,31 +124,100 @@
         </div>
     </div>
 
-
     <script>
         // --- 전역 변수 ---
         let authenticatedStudent = null;
-        
+        let selectedFile = null;
+        let mainSectionInitialized = false; // [수정] 메인 섹션이 초기화되었는지 확인하는 플래그
+
         // --- DOM 요소 변수 ---
         const loginSection = document.getElementById('login-section');
         const passwordChangeSection = document.getElementById('password-change-section');
         const mainSection = document.getElementById('main-section');
         const adminSection = document.getElementById('admin-section');
-        const studentMgmtView = document.getElementById('student-management-view');
-        const photoCheckView = document.getElementById('photo-check-view');
         const loginButton = document.getElementById('login-button');
+        const studentIdInput = document.getElementById('student-id');
+        const studentNameInput = document.getElementById('student-name');
+        const studentPasswordInput = document.getElementById('student-password');
+        const loginStatusMessage = document.getElementById('login-status-message');
         const changePasswordButton = document.getElementById('change-password-button');
-        const fileDropArea = document.getElementById('file-drop-area');
-        const fileInput = document.getElementById('file-input');
-        const uploadButton = document.getElementById('upload-button');
+        const newPasswordInput = document.getElementById('new-password');
+        const confirmPasswordInput = document.getElementById('confirm-password');
+        const changePasswordStatusMessage = document.getElementById('change-password-status-message');
+        const resetModal = document.getElementById('reset-confirm-modal');
         
-        // --- 로그인 관련 ---
-        loginButton.addEventListener('click', async () => {
-            const studentId = document.getElementById('student-id').value;
-            const studentName = document.getElementById('student-name').value;
-            const password = document.getElementById('student-password').value;
-            const statusMsg = document.getElementById('login-status-message');
-            statusMsg.textContent = '';
+        // --- 이벤트 리스너 (페이지 로드 시 즉시 연결) ---
+        loginButton.addEventListener('click', handleLogin);
+        changePasswordButton.addEventListener('click', handleChangePassword);
+
+        // --- 함수 ---
+
+        // [수정] 메인 섹션의 이벤트 리스너를 설정하는 함수
+        function setupMainSectionEventListeners() {
+            if (mainSectionInitialized) return; // 이미 초기화되었다면 중복 실행 방지
+            
+            const welcomeMessage = document.getElementById('welcome-message');
+            const fileDropArea = document.getElementById('file-drop-area');
+            const fileInput = document.getElementById('file-input');
+            const uploadButton = document.getElementById('upload-button');
+
+            welcomeMessage.textContent = `환영합니다, ${authenticatedStudent.classNumber}반 ${authenticatedStudent.name}님!`;
+
+            fileDropArea.addEventListener('click', () => fileInput.click());
+            fileDropArea.addEventListener('dragover', (e) => { e.preventDefault(); fileDropArea.classList.add('drag-over'); });
+            fileDropArea.addEventListener('dragleave', () => fileDropArea.classList.remove('drag-over'));
+            fileDropArea.addEventListener('drop', (e) => { e.preventDefault(); fileDropArea.classList.remove('drag-over'); if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]); });
+            fileInput.addEventListener('change', (e) => { if (e.target.files.length > 0) handleFile(e.target.files[0]); });
+            uploadButton.addEventListener('click', uploadFile);
+
+            loadGallery(authenticatedStudent.classNumber);
+            mainSectionInitialized = true; // 초기화 완료 플래그 설정
+        }
+
+        // [수정] 관리자 섹션의 이벤트 리스너를 설정하는 함수
+        function setupAdminSectionEventListeners() {
+            const adminWelcomeMessage = document.getElementById('admin-welcome-message');
+            const showStudentMgmtBtn = document.getElementById('show-student-mgmt-btn');
+            const showPhotoCheckBtn = document.getElementById('show-photo-check-btn');
+            const studentMgmtView = document.getElementById('student-management-view');
+            const photoCheckView = document.getElementById('photo-check-view');
+
+            adminWelcomeMessage.textContent = `최현종 님, 환영합니다!`;
+            
+            showStudentMgmtBtn.addEventListener('click', () => {
+                photoCheckView.classList.add('hidden');
+                studentMgmtView.classList.remove('hidden');
+                loadStudentManagementView();
+            });
+            showPhotoCheckBtn.addEventListener('click', () => {
+                studentMgmtView.classList.add('hidden');
+                photoCheckView.classList.remove('hidden');
+                loadPhotoCheckView();
+            });
+
+            showStudentMgmtBtn.click(); // 관리자 로그인 시 기본으로 학생 관리 뷰
+        }
+
+
+        function showSection(sectionName) {
+            [loginSection, passwordChangeSection, mainSection, adminSection].forEach(s => s.classList.add('hidden'));
+            
+            if (sectionName === 'login') loginSection.classList.remove('hidden');
+            else if (sectionName === 'password-change') passwordChangeSection.classList.remove('hidden');
+            else if (sectionName === 'main') {
+                mainSection.classList.remove('hidden');
+                setupMainSectionEventListeners(); // [수정] 섹션이 보일 때 이벤트 리스너 설정
+            } else if (sectionName === 'admin') {
+                adminSection.classList.remove('hidden');
+                setupAdminSectionEventListeners(); // [수정] 관리자 섹션 보일 때 이벤트 설정
+            }
+        }
+        
+        async function handleLogin() {
+            const studentId = studentIdInput.value;
+            const studentName = studentNameInput.value;
+            const password = studentPasswordInput.value;
+            loginStatusMessage.textContent = '';
             
             try {
                 const response = await fetch('/api/login', {
@@ -169,34 +230,27 @@
 
                 if (data.isAdmin) {
                     showSection('admin');
-                    document.getElementById('admin-welcome-message').textContent = `${data.admin.name} 님, 환영합니다!`;
-                    // 관리자 로그인 시 기본으로 학생 관리 뷰를 보여줍니다.
-                    document.getElementById('show-student-mgmt-btn').click();
                 } else {
                     authenticatedStudent = data.student;
                     if (data.requiresPasswordChange) {
                         showSection('password-change');
                     } else {
                         showSection('main');
-                        document.getElementById('welcome-message').textContent = `환영합니다, ${authenticatedStudent.classNumber}반 ${authenticatedStudent.name}님!`;
-                        loadGallery(authenticatedStudent.classNumber);
                     }
                 }
             } catch (error) {
-                statusMsg.textContent = error.message;
+                loginStatusMessage.textContent = error.message;
             }
-        });
+        }
 
-        // --- 비밀번호 변경 관련 ---
-        changePasswordButton.addEventListener('click', async () => {
-            const newPassword = document.getElementById('new-password').value;
-            const confirmPassword = document.getElementById('confirm-password').value;
-            const statusMsg = document.getElementById('change-password-status-message');
-            statusMsg.textContent = '';
+        async function handleChangePassword() {
+            const newPassword = newPasswordInput.value;
+            const confirmPassword = confirmPasswordInput.value;
+            changePasswordStatusMessage.textContent = '';
 
-            if (newPassword.length < 4) { statusMsg.textContent = '비밀번호는 4자 이상이어야 합니다.'; return; }
-            if (newPassword !== confirmPassword) { statusMsg.textContent = '비밀번호가 일치하지 않습니다.'; return; }
-            if (newPassword === '1111') { statusMsg.textContent = '초기 비밀번호와 다른 비밀번호를 사용해주세요.'; return; }
+            if (newPassword.length < 4) { changePasswordStatusMessage.textContent = '비밀번호는 4자 이상이어야 합니다.'; return; }
+            if (newPassword !== confirmPassword) { changePasswordStatusMessage.textContent = '비밀번호가 일치하지 않습니다.'; return; }
+            if (newPassword === '1111') { changePasswordStatusMessage.textContent = '초기 비밀번호와 다른 비밀번호를 사용해주세요.'; return; }
 
             try {
                 const response = await fetch('/api/change-password', {
@@ -208,54 +262,143 @@
                 if (!response.ok) throw new Error(data.message);
                 
                 showSection('main');
-                document.getElementById('welcome-message').textContent = `환영합니다, ${authenticatedStudent.classNumber}반 ${authenticatedStudent.name}님!`;
-                loadGallery(authenticatedStudent.classNumber);
             } catch (error) {
-                statusMsg.textContent = error.message;
+                changePasswordStatusMessage.textContent = error.message;
             }
-        });
+        }
+        
+        function handleFile(file) {
+            const statusMessage = document.getElementById('status-message');
+            const imagePreview = document.getElementById('image-preview');
+            const fileInfo = document.getElementById('file-info');
+            const imagePreviewContainer = document.getElementById('image-preview-container');
+            const fileNameDisplay = document.getElementById('file-name');
+            const uploadButton = document.getElementById('upload-button');
+            const buttonText = document.getElementById('button-text');
 
-        // --- 화면 전환 함수 ---
-        function showSection(sectionName) {
-            loginSection.classList.add('hidden');
-            passwordChangeSection.classList.add('hidden');
-            mainSection.classList.add('hidden');
-            adminSection.classList.add('hidden');
-            if (sectionName === 'login') loginSection.classList.remove('hidden');
-            if (sectionName === 'password-change') passwordChangeSection.classList.remove('hidden');
-            if (sectionName === 'main') mainSection.classList.remove('hidden');
-            if (sectionName === 'admin') adminSection.classList.remove('hidden');
+            if (!file.type.startsWith('image/')) {
+                statusMessage.textContent = '이미지 파일만 업로드할 수 있습니다.';
+                statusMessage.className = 'mt-4 text-center text-sm font-medium text-red-600';
+                return;
+            }
+            selectedFile = file;
+            statusMessage.textContent = '';
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                imagePreview.src = e.target.result;
+                fileInfo.classList.add('hidden');
+                imagePreviewContainer.classList.remove('hidden');
+                fileNameDisplay.textContent = selectedFile.name;
+            };
+            reader.readAsDataURL(selectedFile);
+            uploadButton.disabled = false;
+            buttonText.textContent = '업로드';
         }
 
-        // --- 관리자 페이지 기능 ---
-        document.getElementById('show-student-mgmt-btn').addEventListener('click', () => {
-            photoCheckView.classList.add('hidden');
-            studentMgmtView.classList.remove('hidden');
-            loadStudentManagementView();
-        });
-        document.getElementById('show-photo-check-btn').addEventListener('click', () => {
-            studentMgmtView.classList.add('hidden');
-            photoCheckView.classList.remove('hidden');
-            loadPhotoCheckView();
-        });
+        async function uploadFile() {
+            if (!selectedFile || !authenticatedStudent) return;
+            
+            const uploadButton = document.getElementById('upload-button');
+            const buttonText = document.getElementById('button-text');
+            const spinner = document.getElementById('spinner');
+            const statusMessage = document.getElementById('status-message');
+            
+            uploadButton.disabled = true;
+            buttonText.textContent = '업로드 중...';
+            spinner.classList.remove('hidden');
+            statusMessage.textContent = '';
+            
+            const formData = new FormData();
+            formData.append('image', selectedFile);
+            formData.append('studentId', authenticatedStudent.id);
+            formData.append('studentName', authenticatedStudent.name);
+            formData.append('classNumber', authenticatedStudent.classNumber);
 
+            try {
+                const response = await fetch('/upload', { method: 'POST', body: formData });
+                const result = await response.json();
+                if (response.ok) {
+                    statusMessage.textContent = '✅ 성공적으로 업로드되었습니다!';
+                    statusMessage.className = 'mt-4 text-center text-sm font-medium text-green-600';
+                    resetUploadUI();
+                    loadGallery(authenticatedStudent.classNumber);
+                } else {
+                    throw new Error(result.message || '업로드에 실패했습니다.');
+                }
+            } catch (error) {
+                statusMessage.textContent = `❌ 오류 발생: ${error.message}`;
+                statusMessage.className = 'mt-4 text-center text-sm font-medium text-red-600';
+                uploadButton.disabled = false;
+            } finally {
+                buttonText.textContent = '업로드';
+                spinner.classList.add('hidden');
+            }
+        }
+
+        function resetUploadUI() {
+            const fileInput = document.getElementById('file-input');
+            const fileInfo = document.getElementById('file-info');
+            const imagePreviewContainer = document.getElementById('image-preview-container');
+            const imagePreview = document.getElementById('image-preview');
+            const fileNameDisplay = document.getElementById('file-name');
+            const uploadButton = document.getElementById('upload-button');
+            const buttonText = document.getElementById('button-text');
+
+            selectedFile = null;
+            fileInput.value = '';
+            fileInfo.classList.remove('hidden');
+            imagePreviewContainer.classList.add('hidden');
+            imagePreview.src = '';
+            fileNameDisplay.textContent = '';
+            uploadButton.disabled = true;
+            buttonText.textContent = '파일을 선택해주세요';
+        }
+
+        async function loadGallery(classNumber) {
+            const galleryContainer = document.getElementById('gallery-container');
+            const galleryStatus = document.getElementById('gallery-status');
+            const gallerySpinnerContainer = document.getElementById('gallery-spinner-container');
+            
+            galleryContainer.innerHTML = '';
+            galleryStatus.textContent = '';
+            gallerySpinnerContainer.classList.remove('hidden');
+            
+            try {
+                const response = await fetch(`/api/images/${classNumber}`);
+                if (!response.ok) throw new Error('갤러리를 불러오는 데 실패했습니다.');
+                const images = await response.json();
+
+                if (images.length === 0) {
+                    galleryStatus.textContent = '아직 업로드된 이미지가 없습니다.';
+                } else {
+                    images.forEach(image => {
+                        const galleryItem = document.createElement('div');
+                        galleryItem.className = 'bg-white p-2 rounded-lg shadow-md text-center';
+                        galleryItem.innerHTML = `<a href="${image.url.replace(/=s\d+/, '=s1600')}" target="_blank" title="${image.fileName}"><img src="${image.url}" alt="${image.fileName}" class="w-full h-24 object-cover rounded-md mb-2"></a><p class="text-xs font-semibold text-gray-700 truncate">${image.studentName}</p>`;
+                        galleryContainer.appendChild(galleryItem);
+                    });
+                }
+            } catch (error) {
+                galleryStatus.textContent = `오류: ${error.message}`;
+            } finally {
+                gallerySpinnerContainer.classList.add('hidden');
+            }
+        }
+
+        // --- 관리자 페이지 관련 함수 ---
         async function loadPhotoCheckView() {
-            const adminContainer = document.getElementById('admin-gallery-container');
-            adminContainer.innerHTML = '<div class="flex justify-center items-center h-32"><div class="spinner w-8 h-8 border-4 border-gray-200 rounded-full"></div></div>';
+            const adminGalleryContainer = document.getElementById('admin-gallery-container');
+            adminGalleryContainer.innerHTML = '<div class="flex justify-center items-center h-32"><div class="spinner w-8 h-8 border-4 border-gray-200 rounded-full"></div></div>';
             try {
                 const response = await fetch('/api/admin/all-images');
                 const allImages = await response.json();
-                adminContainer.innerHTML = '';
+                adminGalleryContainer.innerHTML = '';
                 if (allImages.length === 0) {
-                    adminContainer.innerHTML = '<p class="text-center text-gray-500">업로드된 이미지가 없습니다.</p>';
+                    adminGalleryContainer.innerHTML = '<p class="text-center text-gray-500">업로드된 이미지가 없습니다.</p>';
                     return;
                 }
                 const imagesByClass = { '1': [], '2': [], '3': [], '4': [] };
-                allImages.forEach(image => {
-                    if (imagesByClass[image.classNumber]) {
-                        imagesByClass[image.classNumber].push(image);
-                    }
-                });
+                allImages.forEach(image => { if (imagesByClass[image.classNumber]) { imagesByClass[image.classNumber].push(image); } });
                 ['1', '2', '3', '4'].forEach(classNum => {
                     imagesByClass[classNum].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
                     const classSection = document.createElement('div');
@@ -270,28 +413,24 @@
                                     <p class="text-xs font-semibold text-gray-700 truncate">${image.studentName}</p>
                                 </div>`;
                         });
-                    } else {
-                        imagesHTML = '<p class="text-center text-gray-500 col-span-full">업로드된 이미지가 없습니다.</p>';
-                    }
+                    } else { imagesHTML = '<p class="text-center text-gray-500 col-span-full">업로드된 이미지가 없습니다.</p>'; }
                     classSection.innerHTML = `
                         <h2 class="text-2xl font-bold text-gray-800 mb-4 pb-2 border-b-2 border-indigo-200">${classNum}반 갤러리 (${imagesByClass[classNum].length}개)</h2>
                         <div class="gallery-container grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-4 max-h-96 overflow-y-auto p-2 rounded-lg bg-indigo-50">
                             ${imagesHTML}
                         </div>`;
-                    adminContainer.appendChild(classSection);
+                    adminGalleryContainer.appendChild(classSection);
                 });
-            } catch (error) {
-                adminContainer.innerHTML = `<p class="text-center text-red-500">데이터를 불러오는 중 오류 발생: ${error.message}</p>`;
-            }
+            } catch (error) { adminGalleryContainer.innerHTML = `<p class="text-center text-red-500">데이터를 불러오는 중 오류 발생: ${error.message}</p>`; }
         }
         
         async function loadStudentManagementView() {
-            const container = studentMgmtView.querySelector('.student-list-container');
-            container.innerHTML = '<div class="flex justify-center items-center h-32"><div class="spinner w-8 h-8 border-4 border-gray-200 rounded-full"></div></div>';
+            const studentListContainer = document.querySelector('#student-management-view .student-list-container');
+            studentListContainer.innerHTML = '<div class="flex justify-center items-center h-32"><div class="spinner w-8 h-8 border-4 border-gray-200 rounded-full"></div></div>';
             try {
                 const response = await fetch('/api/admin/students');
                 const students = await response.json();
-                container.innerHTML = `
+                studentListContainer.innerHTML = `
                     <table class="w-full text-left">
                         <thead class="bg-gray-100">
                             <tr>
@@ -302,7 +441,7 @@
                         </thead>
                         <tbody></tbody>
                     </table>`;
-                const tbody = container.querySelector('tbody');
+                const tbody = studentListContainer.querySelector('tbody');
                 students.forEach(student => {
                     const row = document.createElement('tr');
                     row.className = 'border-b hover:bg-gray-50';
@@ -316,7 +455,6 @@
                     `;
                     tbody.appendChild(row);
                 });
-
                 document.querySelectorAll('.reset-pw-btn').forEach(button => {
                     button.addEventListener('click', (e) => {
                         const studentId = e.target.dataset.id;
@@ -325,13 +463,9 @@
                         showResetConfirmModal(studentId, studentName, statusSpan);
                     });
                 });
-            } catch (error) {
-                container.innerHTML = `<p class="text-center text-red-500">학생 목록 로드 실패: ${error.message}</p>`;
-            }
+            } catch (error) { studentListContainer.innerHTML = `<p class="text-center text-red-500">학생 목록 로드 실패: ${error.message}</p>`; }
         }
 
-        // --- 비밀번호 초기화 확인 모달 ---
-        const resetModal = document.getElementById('reset-confirm-modal');
         function showResetConfirmModal(studentId, studentName, statusSpan) {
             document.getElementById('reset-confirm-text').textContent = `${studentName}(${studentId}) 학생의 비밀번호를 '1111'로 초기화하시겠습니까?`;
             resetModal.classList.remove('hidden');
@@ -355,93 +489,21 @@
                     statusSpan.textContent = '오류!';
                     setTimeout(() => statusSpan.textContent = '', 3000);
                 } finally {
-                    hideResetConfirmModal();
+                    hideResetConfirmModal(confirmHandler);
                 }
             };
+            
+            const cancelHandler = () => hideResetConfirmModal(confirmHandler);
 
-            const hideResetConfirmModal = () => {
+            const hideResetConfirmModal = (confirmHandler) => {
                 resetModal.classList.add('opacity-0');
                 setTimeout(() => resetModal.classList.add('hidden'), 200);
                 confirmBtn.removeEventListener('click', confirmHandler);
-                cancelBtn.removeEventListener('click', hideResetConfirmModal);
+                cancelBtn.removeEventListener('click', cancelHandler);
             };
 
             confirmBtn.addEventListener('click', confirmHandler, { once: true });
-            cancelBtn.addEventListener('click', hideResetConfirmModal, { once: true });
-        }
-
-        // --- 학생용 갤러리/업로드 기능 ---
-        let selectedFile = null;
-        const buttonText = document.getElementById('button-text');
-        const spinner = document.getElementById('spinner');
-        const statusMessage = document.getElementById('status-message');
-        const fileInfo = document.getElementById('file-info');
-        const imagePreviewContainer = document.getElementById('image-preview-container');
-        const imagePreview = document.getElementById('image-preview');
-        const fileNameDisplay = document.getElementById('file-name');
-        const galleryContainer = document.getElementById('gallery-container');
-        const gallerySpinnerContainer = document.getElementById('gallery-spinner-container');
-        const galleryStatus = document.getElementById('gallery-status');
-
-        async function loadGallery(classNumber) {
-            galleryContainer.innerHTML = '';
-            galleryStatus.textContent = '';
-            gallerySpinnerContainer.classList.remove('hidden');
-            try {
-                const response = await fetch(`/api/images/${classNumber}`);
-                if (!response.ok) throw new Error('갤러리를 불러오는 데 실패했습니다.');
-                const images = await response.json();
-                if (images.length === 0) {
-                    galleryStatus.textContent = '아직 업로드된 이미지가 없습니다.';
-                } else {
-                    images.forEach(image => {
-                        const galleryItem = document.createElement('div');
-                        galleryItem.className = 'bg-white p-2 rounded-lg shadow-md text-center';
-                        galleryItem.innerHTML = `<a href="${image.url.replace(/=s\d+/, '=s1600')}" target="_blank" title="${image.fileName}"><img src="${image.url}" alt="${image.fileName}" class="w-full h-24 object-cover rounded-md mb-2"></a><p class="text-xs font-semibold text-gray-700 truncate">${image.studentName}</p>`;
-                        galleryContainer.appendChild(galleryItem);
-                    });
-                }
-            } catch (error) { galleryStatus.textContent = `오류: ${error.message}`; } finally { gallerySpinnerContainer.classList.add('hidden'); }
-        }
-        fileDropArea.addEventListener('dragover', (e) => { e.preventDefault(); fileDropArea.classList.add('drag-over'); });
-        fileDropArea.addEventListener('dragleave', () => fileDropArea.classList.remove('drag-over'));
-        fileDropArea.addEventListener('drop', (e) => { e.preventDefault(); fileDropArea.classList.remove('drag-over'); if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]); });
-        fileInput.addEventListener('change', (e) => { if (e.target.files.length > 0) handleFile(e.target.files[0]); });
-        
-        function handleFile(file) {
-            if (!file.type.startsWith('image/')) { statusMessage.textContent = '이미지 파일만 업로드할 수 있습니다.'; statusMessage.className = 'mt-4 text-center text-sm font-medium text-red-600'; return; }
-            selectedFile = file; statusMessage.textContent = '';
-            const reader = new FileReader();
-            reader.onload = (e) => { imagePreview.src = e.target.result; fileInfo.classList.add('hidden'); imagePreviewContainer.classList.remove('hidden'); fileNameDisplay.textContent = selectedFile.name; };
-            reader.readAsDataURL(selectedFile);
-            uploadButton.disabled = false; buttonText.textContent = '업로드';
-        }
-
-        uploadButton.addEventListener('click', async () => {
-            if (!selectedFile || !authenticatedStudent) return;
-            uploadButton.disabled = true; buttonText.textContent = '업로드 중...'; spinner.classList.remove('hidden'); statusMessage.textContent = '';
-            const formData = new FormData();
-            formData.append('image', selectedFile);
-            formData.append('studentId', authenticatedStudent.id);
-            formData.append('studentName', authenticatedStudent.name);
-            formData.append('classNumber', authenticatedStudent.classNumber);
-            try {
-                const response = await fetch('/upload', { method: 'POST', body: formData });
-                const result = await response.json();
-                if (response.ok) {
-                    statusMessage.textContent = '✅ 성공적으로 업로드되었습니다!'; statusMessage.className = 'mt-4 text-center text-sm font-medium text-green-600';
-                    resetUI();
-                    loadGallery(authenticatedStudent.classNumber);
-                } else { throw new Error(result.message || '업로드에 실패했습니다.'); }
-            } catch (error) {
-                statusMessage.textContent = `❌ 오류 발생: ${error.message}`; statusMessage.className = 'mt-4 text-center text-sm font-medium text-red-600';
-                uploadButton.disabled = false;
-            } finally { buttonText.textContent = '업로드'; spinner.classList.add('hidden'); }
-        });
-
-        function resetUI() {
-            selectedFile = null; fileInput.value = ''; fileInfo.classList.remove('hidden'); imagePreviewContainer.classList.add('hidden');
-            imagePreview.src = ''; fileNameDisplay.textContent = ''; uploadButton.disabled = true; buttonText.textContent = '파일을 선택해주세요';
+            cancelBtn.addEventListener('click', cancelHandler, { once: true });
         }
     </script>
 </body>
